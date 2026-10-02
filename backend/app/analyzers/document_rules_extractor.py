@@ -30,9 +30,10 @@ METRIC_PATTERNS = [
 ]
 
 TARGET_PATTERNS = [
-    r"(?:target variable|target column|dependent variable|column to predict|predict the value of)\s*(?:is|:)?\s*['\"`]?([a-zA-Z0-9_\-]+)['\"`]?",
-    r"(?:goal is to predict|task is to predict|objective is to predict)\s*(?:whether\s+)?['\"`]?([a-zA-Z0-9_\-]+)['\"`]?",
-    r"(?:predict(?:ing)?)\s+['\"`]?([a-zA-Z0-9_]{3,30})['\"`]?\s+(?:for each|based on|given)",
+    r"(?:target variable|target column|dependent variable|column to predict)\s*(?:is|:)?\s*['\"`]?([a-zA-Z0-9_\-]+)['\"`]?",
+    r"predict(?:ing)?\s+whether\s+(?:[a-zA-Z0-9_\-]+\s+)*has\s+(?:a\s+)?['\"`]?([a-zA-Z0-9_\-]+)['\"`]?",
+    r"predict(?:ing)?\s+(?:customer\s+)?['\"`]?([a-zA-Z0-9_\-]+)['\"`]?\s+(?:probability|volume)",
+    r"predict(?:ing)?\s+['\"`]([a-zA-Z0-9_\-]+)['\"`]",
 ]
 
 ID_PATTERNS = [
