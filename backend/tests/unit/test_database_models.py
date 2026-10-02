@@ -1,4 +1,5 @@
 import pytest
+import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -21,7 +22,7 @@ from app.models import (
 )
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def test_db_session():
     """Isolated in-memory SQLite database session for model testing."""
     test_engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
@@ -167,9 +168,14 @@ async def test_competition_full_lifecycle_and_cascade(test_db_session: AsyncSess
     test_db_session.add(log)
     await test_db_session.commit()
 
+    comp_id = comp.id
+
+    # Expire session so selectin relationships are freshly loaded from the database
+    test_db_session.expire_all()
+
     # Verify query with relationships loaded
     result = await test_db_session.execute(
-        select(Competition).where(Competition.id == comp.id)
+        select(Competition).where(Competition.id == comp_id)
     )
     fetched_comp = result.scalar_one()
     assert len(fetched_comp.files) == 1
@@ -184,17 +190,17 @@ async def test_competition_full_lifecycle_and_cascade(test_db_session: AsyncSess
     await test_db_session.commit()
 
     # Verify orphan records are deleted
-    files_check = await test_db_session.execute(select(CompetitionFile).where(CompetitionFile.competition_id == comp.id))
+    files_check = await test_db_session.execute(select(CompetitionFile).where(CompetitionFile.competition_id == comp_id))
     assert len(files_check.scalars().all()) == 0
 
-    profiles_check = await test_db_session.execute(select(DatasetProfile).where(DatasetProfile.competition_id == comp.id))
+    profiles_check = await test_db_session.execute(select(DatasetProfile).where(DatasetProfile.competition_id == comp_id))
     assert len(profiles_check.scalars().all()) == 0
 
-    analyses_check = await test_db_session.execute(select(CompetitionAnalysis).where(CompetitionAnalysis.competition_id == comp.id))
+    analyses_check = await test_db_session.execute(select(CompetitionAnalysis).where(CompetitionAnalysis.competition_id == comp_id))
     assert len(analyses_check.scalars().all()) == 0
 
-    exps_check = await test_db_session.execute(select(Experiment).where(Experiment.competition_id == comp.id))
+    exps_check = await test_db_session.execute(select(Experiment).where(Experiment.competition_id == comp_id))
     assert len(exps_check.scalars().all()) == 0
 
-    notebooks_check = await test_db_session.execute(select(Notebook).where(Notebook.competition_id == comp.id))
+    notebooks_check = await test_db_session.execute(select(Notebook).where(Notebook.competition_id == comp_id))
     assert len(notebooks_check.scalars().all()) == 0

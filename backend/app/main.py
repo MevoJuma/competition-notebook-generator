@@ -6,7 +6,9 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.router import api_router
 from app.core.config import settings
+from app.core.database import init_db
 from app.core.exceptions import CompetitionPlatformException
 from app.core.logging import get_logger, setup_logging
 
@@ -18,6 +20,7 @@ logger = get_logger("app.main")
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager: runs startup and shutdown hooks."""
     logger.info("Starting up %s v%s", settings.PROJECT_NAME, settings.VERSION)
+    await init_db()
     logger.info("Storage uploads directory: %s", settings.upload_path)
     logger.info("Storage generated directory: %s", settings.generated_path)
     yield
@@ -41,6 +44,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# API Routers
+app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
 @app.exception_handler(CompetitionPlatformException)
