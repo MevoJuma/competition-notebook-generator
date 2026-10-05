@@ -1,12 +1,13 @@
 import { useState, useCallback, useRef } from 'react';
-import { Upload, File, X, CheckCircle, AlertCircle, FolderOpen } from 'lucide-react';
+import { Upload, File, X, CheckCircle, AlertCircle, FolderOpen, Play } from 'lucide-react';
+import { competitionsApi, filesApi } from '../api/client';
+import { usePipelineSSE } from '../hooks/usePipelineSSE';
 
-interface UploadedFile {
+interface QueuedFile {
   id: string;
-  name: string;
-  size: number;
-  type: string;
+  file: File;
   status: 'pending' | 'uploading' | 'done' | 'error';
+  progress: number;
 }
 
 function formatBytes(bytes: number): string {
@@ -23,40 +24,80 @@ function fileCategory(name: string): { label: string; color: string } {
   return { label: 'Other', color: 'badge-purple' };
 }
 
+const STAGE_STATUS_COLOR: Record<string, string> = {
+  idle: 'var(--color-text-muted)',
+  running: 'var(--color-accent-primary)',
+  done: 'var(--color-accent-success)',
+  error: 'var(--color-accent-danger)',
+};
+
 export default function UploadPage() {
-  const [files, setFiles] = useState<UploadedFile[]>([]);
+  const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [competitionName, setCompetitionName] = useState('');
-  const [competitionUrl, setCompetitionUrl] = useState('');
+  const [platform, setPlatform] = useState('zindi');
+  const [competitionId, setCompetitionId] = useState<string | null>(null);
+  const [globalError, setGlobalError] = useState<string | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const { stages, sseStatus, result, connect } = usePipelineSSE(competitionId);
 
   const addFiles = useCallback((incoming: FileList | null) => {
     if (!incoming) return;
-    const newFiles: UploadedFile[] = Array.from(incoming).map((f) => ({
+    const newFiles: QueuedFile[] = Array.from(incoming).map((f) => ({
       id: `${f.name}-${Date.now()}`,
-      name: f.name,
-      size: f.size,
-      type: f.type,
+      file: f,
       status: 'pending',
+      progress: 0,
     }));
-    setFiles((prev) => [...prev, ...newFiles]);
+    setQueuedFiles((prev) => [...prev, ...newFiles]);
   }, []);
 
-  const removeFile = (id: string) => setFiles((prev) => prev.filter((f) => f.id !== id));
+  const removeFile = (id: string) =>
+    setQueuedFiles((prev) => prev.filter((f) => f.id !== id));
 
-  const simulateUpload = () => {
-    setFiles((prev) => prev.map((f) => ({ ...f, status: 'uploading' as const })));
-    setTimeout(() => {
-      setFiles((prev) => prev.map((f) => ({ ...f, status: 'done' as const })));
-    }, 1500);
+  const handleAnalyse = async () => {
+    if (!competitionName.trim() || queuedFiles.length === 0) return;
+    setGlobalError(null);
+    setIsRunning(true);
+
+    try {
+      // 1. Create competition
+      const { data: comp } = await competitionsApi.create(competitionName, platform);
+      setCompetitionId(comp.id);
+
+      // 2. Upload each file sequentially
+      for (const qf of queuedFiles) {
+        setQueuedFiles((prev) =>
+          prev.map((f) => f.id === qf.id ? { ...f, status: 'uploading' } : f)
+        );
+        await filesApi.upload(comp.id, qf.file, (pct) => {
+          setQueuedFiles((prev) =>
+            prev.map((f) => f.id === qf.id ? { ...f, progress: pct } : f)
+          );
+        });
+        setQueuedFiles((prev) =>
+          prev.map((f) => f.id === qf.id ? { ...f, status: 'done', progress: 100 } : f)
+        );
+      }
+
+      // 3. Start SSE stream (pipeline is triggered server-side after upload)
+      connect();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Upload failed';
+      setGlobalError(msg);
+      setIsRunning(false);
+    }
   };
+
+  const pipelineStarted = sseStatus !== 'idle';
 
   return (
     <div className="page animate-fade-in">
       <div className="grid-2" style={{ alignItems: 'start', gap: 'var(--space-6)' }}>
-        {/* Left: Upload zone + file list */}
+        {/* Left: drop zone + file list */}
         <div>
-          {/* Drop zone */}
           <div
             id="upload-dropzone"
             className={`upload-zone mb-6 ${dragOver ? 'drag-over' : ''}`}
@@ -83,47 +124,101 @@ export default function UploadPage() {
             </div>
           </div>
 
-          {/* File list */}
-          {files.length > 0 && (
+          {queuedFiles.length > 0 && (
             <div className="card">
               <div className="card-header">
                 <div className="card-title">
                   <FolderOpen size={16} style={{ display: 'inline', marginRight: 6 }} />
-                  Queued Files ({files.length})
+                  Queued Files ({queuedFiles.length})
                 </div>
-                <button className="btn btn-ghost btn-sm" onClick={() => setFiles([])}>Clear all</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setQueuedFiles([])}>
+                  Clear all
+                </button>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-                {files.map((f) => {
-                  const cat = fileCategory(f.name);
+                {queuedFiles.map((qf) => {
+                  const cat = fileCategory(qf.file.name);
                   return (
-                    <div key={f.id} style={{
-                      display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
+                    <div key={qf.id} style={{
                       padding: 'var(--space-3)',
                       background: 'var(--color-bg-input)',
                       borderRadius: 'var(--radius-md)',
                       border: '1px solid var(--color-border)',
                     }}>
-                      <File size={16} color="var(--color-text-muted)" />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {f.name}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                        <File size={16} color="var(--color-text-muted)" />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {qf.file.name}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                            {formatBytes(qf.file.size)}
+                          </div>
                         </div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{formatBytes(f.size)}</div>
+                        <span className={`badge ${cat.color}`}>{cat.label}</span>
+                        {qf.status === 'uploading' && <div className="spinner" style={{ width: 14, height: 14 }} />}
+                        {qf.status === 'done' && <CheckCircle size={16} color="var(--color-accent-success)" />}
+                        {qf.status === 'error' && <AlertCircle size={16} color="var(--color-accent-danger)" />}
+                        {qf.status === 'pending' && (
+                          <button className="btn-icon" style={{ width: 28, height: 28 }} onClick={() => removeFile(qf.id)}>
+                            <X size={12} />
+                          </button>
+                        )}
                       </div>
-                      <span className={`badge ${cat.color}`}>{cat.label}</span>
-                      {f.status === 'uploading' && <div className="spinner" style={{ width: 14, height: 14 }} />}
-                      {f.status === 'done' && <CheckCircle size={16} color="var(--color-accent-success)" />}
-                      {f.status === 'error' && <AlertCircle size={16} color="var(--color-accent-danger)" />}
-                      {f.status === 'pending' && (
-                        <button id={`remove-${f.id}`} className="btn-icon" style={{ width: 28, height: 28 }} onClick={() => removeFile(f.id)}>
-                          <X size={12} />
-                        </button>
+                      {qf.status === 'uploading' && (
+                        <div className="progress-bar" style={{ marginTop: 'var(--space-2)' }}>
+                          <div className="progress-fill" style={{ width: `${qf.progress}%` }} />
+                        </div>
                       )}
                     </div>
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* Pipeline status (shown once SSE starts) */}
+          {pipelineStarted && (
+            <div className="card mt-4" style={{ marginTop: 'var(--space-4)' }}>
+              <div className="card-header mb-4">
+                <div className="card-title">Live Pipeline</div>
+                <span className={`badge ${sseStatus === 'open' ? 'badge-green' : sseStatus === 'error' ? 'badge-red' : 'badge-yellow'}`}>
+                  {sseStatus}
+                </span>
+              </div>
+              <div className="pipeline">
+                {stages.map((s) => (
+                  <div key={s.stage} className={`pipeline-step ${s.status === 'done' ? 'done' : s.status === 'running' ? 'active' : ''}`}>
+                    <div className="pipeline-step-number" style={{ color: STAGE_STATUS_COLOR[s.status] }}>
+                      {s.status === 'done' ? '✓' : s.stage}
+                    </div>
+                    <div className="pipeline-step-content">
+                      <div className="pipeline-step-title">{s.name}</div>
+                      {s.data && (
+                        <div className="pipeline-step-desc">
+                          {Object.entries(s.data)
+                            .filter(([k]) => !['stage', 'name'].includes(k))
+                            .map(([k, v]) => `${k}: ${v}`)
+                            .join(' · ')}
+                        </div>
+                      )}
+                    </div>
+                    {s.status === 'running' && <div className="spinner" />}
+                  </div>
+                ))}
+              </div>
+
+              {result && (
+                <div className="alert alert-success" style={{ marginTop: 'var(--space-4)' }}>
+                  <CheckCircle size={16} style={{ flexShrink: 0 }} />
+                  <div>
+                    <strong>Analysis complete!</strong>
+                    <div style={{ fontSize: '0.8rem', marginTop: 4 }}>
+                      {result.problem_type} · Target: {result.target} · Metric: {result.metric} · CV: {result.cv_strategy}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -137,6 +232,13 @@ export default function UploadPage() {
             </div>
           </div>
 
+          {globalError && (
+            <div className="alert alert-danger mb-4">
+              <AlertCircle size={14} style={{ flexShrink: 0 }} />
+              {globalError}
+            </div>
+          )}
+
           <div className="form-group">
             <label className="form-label" htmlFor="comp-name">Competition Name</label>
             <input
@@ -145,23 +247,19 @@ export default function UploadPage() {
               placeholder="e.g. Financial Inclusion in Africa"
               value={competitionName}
               onChange={(e) => setCompetitionName(e.target.value)}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="comp-url">Competition URL (optional)</label>
-            <input
-              id="comp-url"
-              className="form-input"
-              placeholder="https://zindi.africa/competitions/..."
-              value={competitionUrl}
-              onChange={(e) => setCompetitionUrl(e.target.value)}
+              disabled={isRunning}
             />
           </div>
 
           <div className="form-group">
             <label className="form-label" htmlFor="comp-platform">Platform</label>
-            <select id="comp-platform" className="form-select">
+            <select
+              id="comp-platform"
+              className="form-select"
+              value={platform}
+              onChange={(e) => setPlatform(e.target.value)}
+              disabled={isRunning}
+            >
               <option value="zindi">Zindi</option>
               <option value="kaggle">Kaggle</option>
               <option value="other">Other</option>
@@ -173,7 +271,7 @@ export default function UploadPage() {
           <div className="alert alert-info mb-4">
             <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
             <div>
-              Upload at least <strong>train.csv</strong> and optionally <strong>test.csv</strong>, 
+              Upload at least <strong>train.csv</strong> and optionally <strong>test.csv</strong>,
               a sample submission CSV, and any PDF/DOCX competition rules.
             </div>
           </div>
@@ -182,11 +280,12 @@ export default function UploadPage() {
             id="start-analysis-btn"
             className="btn btn-primary"
             style={{ width: '100%', justifyContent: 'center' }}
-            disabled={files.length === 0}
-            onClick={simulateUpload}
+            disabled={queuedFiles.length === 0 || !competitionName.trim() || isRunning}
+            onClick={handleAnalyse}
           >
-            <Upload size={16} />
-            {files.length === 0 ? 'Add files to begin' : `Analyse ${files.length} file${files.length > 1 ? 's' : ''}`}
+            {isRunning
+              ? <><div className="spinner" /> Running…</>
+              : <><Play size={16} /> Analyse {queuedFiles.length} file{queuedFiles.length !== 1 ? 's' : ''}</>}
           </button>
         </div>
       </div>
