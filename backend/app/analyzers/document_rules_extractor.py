@@ -37,7 +37,7 @@ TARGET_PATTERNS = [
 ]
 
 ID_PATTERNS = [
-    r"(?:unique identifier|identifier column|id column|primary key|unique id)\s*(?:is|:)?\s*['\"`]?([a-zA-Z0-9_\-]+)['\"`]?",
+    r"(?:unique identifier|identifier column|id column|primary key|unique id)(?:\s+\w+){0,2}\s*(?:is|:)?\s*['\"`]?([a-zA-Z0-9_\-]+)['\"`]?",
     r"(?:each row is identified by|identified uniquely by)\s*['\"`]?([a-zA-Z0-9_\-]+)['\"`]?",
 ]
 

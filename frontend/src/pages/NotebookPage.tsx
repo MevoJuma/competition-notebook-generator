@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BookOpen, Download, CheckCircle, AlertCircle, Loader, Sparkles } from 'lucide-react';
+import { BookOpen, Download, CheckCircle, AlertCircle, Sparkles } from 'lucide-react';
 
 const MOCK_PLAN = {
   competition_title: 'Financial Inclusion in Africa',

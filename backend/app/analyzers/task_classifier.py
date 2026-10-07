@@ -83,11 +83,20 @@ class CompetitionTaskClassifier:
                     break
         
         if not id_candidate:
-            # Fallback heuristic: look for "id" in column name
+            # Fallback heuristic 1: common name patterns
             for col in train_profile.schema_definition.keys():
-                if col.lower() in ("id", "index") or col.lower().endswith("_id"):
+                if col.lower() in ("id", "index", "uniqueid", "unique_id") or col.lower().endswith("_id"):
                     id_candidate = col
                     result.reasoning.append(f"ID column '{id_candidate}' inferred from column name heuristic.")
+                    confidence += 0.1
+                    break
+
+        if not id_candidate:
+            # Fallback heuristic 2: column where unique_count == row_count (true identifier)
+            for col, prof in train_profile.column_profiles.items():
+                if col != target and prof.unique_count == train_profile.row_count:
+                    id_candidate = col
+                    result.reasoning.append(f"ID column '{id_candidate}' inferred: unique count equals row count.")
                     confidence += 0.1
                     break
         

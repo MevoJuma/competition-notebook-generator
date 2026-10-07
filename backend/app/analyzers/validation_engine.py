@@ -44,6 +44,9 @@ class ValidationEngine:
         for col, prof in train_profile.column_profiles.items():
             if col != task_result.id_column and col != task_result.target_column:
                 if prof.dtype in ("String", "Categorical") and prof.unique_count and 1 < prof.unique_count < 1000:
+                    # Exclude high-cardinality columns — they are IDs, not groups
+                    if prof.unique_count > train_profile.row_count * 0.1:
+                        continue
                     if col.lower().endswith("id") or "group" in col.lower() or "store" in col.lower():
                         group_candidates.append(col)
                         
